@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: campus-frontend
+  labels:
+    app: campus-frontend
+    app.kubernetes.io/part-of: campus-desk
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: campus-frontend
+  template:
+    metadata:
+      labels:
+        app: campus-frontend
+        app.kubernetes.io/part-of: campus-desk
+    spec:
+      containers:
+        - name: frontend
+          image: campus-student-frontend:1.0
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: campus-frontend
+  labels:
+    app.kubernetes.io/part-of: campus-desk
+spec:
+  selector:
+    app: campus-frontend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: campus-desk
+  labels:
+    app.kubernetes.io/part-of: campus-desk
+spec:
+  to:
+    kind: Service
+    name: campus-frontend
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

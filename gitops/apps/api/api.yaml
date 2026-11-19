@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: student-api
+  labels:
+    app: student-api
+    app.kubernetes.io/part-of: campus-desk
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: student-api
+  template:
+    metadata:
+      labels:
+        app: student-api
+        app.kubernetes.io/part-of: campus-desk
+    spec:
+      containers:
+        - name: api
+          image: campus-student-api:1.0
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: "3000"
+            - name: DB_HOST
+              value: student-db
+            - name: DB_PORT
+              value: "3306"
+            - name: DB_NAME
+              value: student_management
+            - name: DB_USER
+              value: student_app
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: student-db-secret
+                  key: MYSQL_PASSWORD
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: student-api
+  labels:
+    app.kubernetes.io/part-of: campus-desk
+spec:
+  selector:
+    app: student-api
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+      protocol: TCP
