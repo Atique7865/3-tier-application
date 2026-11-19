@@ -180,7 +180,7 @@ docker run -d \
   --name student-frontend \
   --network student-network \
   --restart unless-stopped \
-  -p 8080:80 \
+  -p 8080:8080 \
   campus-student-frontend:1.0
 ```
 
@@ -216,6 +216,75 @@ To permanently erase the database records too, remove the volume **only if you i
 docker volume rm student-mysql-data
 ```
 
+## Deploy to an OpenShift Sandbox
+
+These manifests deploy the frontend, API, and MySQL database in the currently selected OpenShift project. MySQL uses a 1 GiB persistent volume claim. The frontend is exposed through an OpenShift Route with edge TLS. The application images are pulled from Docker Hub; create public repositories if you want the Sandbox to pull them without image pull credentials.
+
+### 1. Build and publish the application images
+
+Create two repositories in [Docker Hub](https://hub.docker.com/): `campus-student-api` and `campus-student-frontend`. Set each repository's visibility to **Public** in its settings. Use your Docker Hub username in the commands below. Public visibility allows anyone to pull the images; it does not make your student data public.
+
+From the project root, build and tag both images (replace `YOUR_DOCKERHUB_USERNAME`):
+
+```bash
+docker build -t YOUR_DOCKERHUB_USERNAME/campus-student-api:1.0 ./backend
+docker build -t YOUR_DOCKERHUB_USERNAME/campus-student-frontend:1.0 ./frontend
+docker login --username YOUR_DOCKERHUB_USERNAME
+docker push YOUR_DOCKERHUB_USERNAME/campus-student-api:1.0
+docker push YOUR_DOCKERHUB_USERNAME/campus-student-frontend:1.0
+```
+
+Docker prompts for your password or access token. Verify both `1.0` tags appear in the repositories on Docker Hub. Docker Hub can create a repository on first push, but creating each repository first lets you choose **Public** visibility before publishing. If you push first and a repository is private, change its visibility in that repository's settings.
+
+### 2. Select the connected OpenShift project
+
+Use the `oc` CLI session that is already logged in to your Sandbox. Check the active project before applying resources:
+
+```bash
+oc whoami
+oc project
+oc get projects
+```
+
+If needed, select your Sandbox project with `oc project YOUR_PROJECT_NAME`. The manifests apply to the selected project and do not create a project.
+
+### 3. Set the Docker Hub image namespace
+
+Edit `openshift/kustomization.yaml` and replace both occurrences of `YOUR_DOCKERHUB_USERNAME` with your Docker Hub username. The configured repository names and `1.0` tags must match the images you pushed.
+
+### 4. Create the database credentials and deploy
+
+Create a Kubernetes Secret in your selected project. Choose strong passwords and keep them private. This command does not add the credentials to the manifest files:
+
+```bash
+oc create secret generic student-db-secret \
+  --from-literal=MYSQL_PASSWORD='choose_a_strong_app_password' \
+  --from-literal=MYSQL_ROOT_PASSWORD='choose_a_different_root_password'
+```
+
+Apply the manifests and wait for the workloads:
+
+```bash
+oc apply -k openshift
+oc rollout status deployment/student-db --timeout=5m
+oc rollout status deployment/student-api --timeout=5m
+oc rollout status deployment/campus-frontend --timeout=5m
+oc get pods,pvc,svc,route
+```
+
+Get the public HTTPS URL from the `HOST/PORT` column in `oc get route`, then open it in a browser. The API and database remain internal to the project; the route exposes only the frontend. The frontend proxies `/api` requests to the API service.
+
+### Update or remove the Sandbox deployment
+
+After publishing a new image tag, update the `newTag` for the image in `openshift/kustomization.yaml`, then run `oc apply -k openshift` and `oc rollout status` for the updated deployment. To remove the app resources, run `oc delete -k openshift`. The database PVC is included in these manifests and will also be deleted, so deleting it removes the stored student records. Check your Sandbox's storage and project quotas if the database pod remains pending.
+
+### Troubleshooting OpenShift
+
+- **Image pull failure:** verify both Docker Hub repositories are public, the image names/tags in `openshift/kustomization.yaml` match, and the tag exists.
+- **Database pod pending:** check `oc describe pod -l app=student-db` and `oc get pvc`; the project's quota or default storage class might not allow the requested volume.
+- **API is not ready:** inspect `oc logs deployment/student-api` and `oc logs deployment/student-db`. The API waits for MySQL during startup.
+- **Route is unavailable:** run `oc get route campus-desk` and `oc describe route campus-desk` to inspect its host and service target.
+
 ## API routes
 
 All routes return JSON except a successful `DELETE`, which returns HTTP 204 with no body.
@@ -243,8 +312,8 @@ curl -X POST http://localhost:3000/api/students \
 - **API cannot connect to MySQL:** check that MySQL is running (`sudo systemctl status mysql` for manual setup, or `docker logs student-db` for Docker) and that the database username, password, and host match the selected setup.
 - **Docker API exits during database startup:** wait for `student-db` to report `ready for connections`, then restart the API with `docker restart student-api` and inspect `docker logs student-api`.
 - **Page loads but students do not:** check the API health endpoint and browser developer console. In Docker, confirm all three containers are running and attached to `student-network` with `docker network inspect student-network`.
-- **Port already in use:** stop the other service or change the published host port. For example, `-p 8081:80` makes the Docker UI available at `http://localhost:8081`.
+- **Port already in use:** stop the other service or change the published host port. For example, `-p 8081:8080` makes the Docker UI available at `http://localhost:8081`.
 
 ## Notes
 
-This is a learning project. The Docker commands use example credentials for clarity; use private secrets and restrict host port exposure before using this application beyond a local development machine. The sample UI loads its Google Font from Google Fonts when internet access is available and falls back to system fonts otherwise.
+This is a learning project. The student directory has no login or access control, so anyone who can reach the public Sandbox route can view, add, change, or delete records. Use synthetic test data only. Keep database credentials in OpenShift Secrets, not in image files or public repositories. The sample UI loads its Google Font from Google Fonts when internet access is available and falls back to system fonts otherwise.

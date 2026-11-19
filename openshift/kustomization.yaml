@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - mysql.yaml
+  - api.yaml
+  - frontend.yaml
+images:
+  - name: campus-student-api
+    newName: YOUR_DOCKERHUB_USERNAME/campus-student-api
+    newTag: "1.0"
+  - name: campus-student-frontend
+    newName: YOUR_DOCKERHUB_USERNAME/campus-student-frontend
+    newTag: "1.0"
